@@ -7,13 +7,25 @@ Original file is located at
     https://colab.research.google.com/drive/1g4dbzMiDjdul3Z9Qih_t_g6hsxIXZYQI
 """
 
+#testing with multiple paging 
+#ideas 
+#have the default layer made if there no layers in the list found to be layer + #
+#ex means if no paging layer is layer 1, then make layer1 = reuglar setup 
+
+#idea is to sort all the paged layers, starting from no layer# until the layer5 stuff and then clump them into sections to pass into basic block 
+
+# paged_layers = ['self.bn1', 'layer1.0.bn1','layer2.0.bn1', 'layer1.0.conv1','layer2.0.conv1', 'layer1.1.conv1']
+# initial_layers = [x for x in paged_layers if 'layer' not in x]
+# [paged_layers.remove(x) for x in paged_layers if x in initial_layers]
+# paged_layers.sort(key = lambda x: x.split('layer')[1] if 'layer' in x else x)
+# initial_layers, paged_layers
+
 from functools import partial
 from typing import Any, Callable, List, Optional, Type, Union
 
 import torch
 import torch.nn as nn
 from torch import Tensor
-
 class BasicBlock(nn.Module):
     def __init__(
         self, 
@@ -21,7 +33,8 @@ class BasicBlock(nn.Module):
         out_channels: int,
         stride: int = 1,
         expansion: int = 1,
-        downsample: nn.Module = None
+        downsample: nn.Module = None,
+        page_layers = None,
     ) -> None:
         super(BasicBlock, self).__init__()
         # Multiplicative factor for the subsequent conv2d layer's output channels.
@@ -46,26 +59,45 @@ class BasicBlock(nn.Module):
             bias=False
         )
         self.bn2 = nn.BatchNorm2d(out_channels*self.expansion)
+        self.page_layers = page_layers
+
+
     def forward(self, x: Tensor) -> Tensor:
         identity = x
-        out = self.conv1(x)
-        out = self.bn1(out)
-        out = self.relu(out)
-        out = self.conv2(out)
-        out = self.bn2(out)
+        out_conv1 = self.conv1(x)
+        out_bn1 = self.bn1(out_conv1)
+        out_relu = self.relu(out_bn1)
+        out_conv2 = self.conv2(out_relu)
+        out_bn2 = self.bn2(out_conv2)
         if self.downsample is not None:
             identity = self.downsample(x)
-        out += identity
-        out = self.relu(out)
-        return  out
-
+        out_bn2 += identity
+        #come back to this double relu later
+        out = self.relu(out_bn2)
+        if not self.page_layers:
+          return out
+        else:
+          for layer in self.page_layers:
+            if 'conv1' in layer:
+              out_conv1.cpu()
+            if 'conv2' in layer:
+              out_conv2.cpu()
+            if 'bn1' in layer:
+              out_bn1.cpu()
+            if 'bn2' in layer:
+              out_bn2.cpu()
+            if 'relu' in layer:
+              out_relu.cpu()
+          return  out
+      
 class ResNet(nn.Module):
     def __init__(
-        self, 
+        self,
+        paged_layers: list, 
         img_channels: int,
         num_layers: int,
         block: Type[BasicBlock],
-        num_classes: int  = 1000
+        num_classes: int  = 1000,
     ) -> None:
         super(ResNet, self).__init__()
         if num_layers == 18:
@@ -76,33 +108,121 @@ class ResNet(nn.Module):
             self.expansion = 1
         
         self.in_channels = 64
-        # All ResNets (18 to 152) contain a Conv2d => BN => ReLU for the first
-        # three layers. Here, kernel size is 7.
-        self.conv1 = nn.Conv2d(
-            in_channels=img_channels,
-            out_channels=self.in_channels,
-            kernel_size=7, 
-            stride=2,
-            padding=3,
-            bias=False
-        )
-        self.bn1 = nn.BatchNorm2d(self.in_channels)
-        self.relu = nn.ReLU(inplace=True)
-        self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
-        self.layer1 = self._make_layer(block, 64, layers[0])
-        self.layer2 = self._make_layer(block, 128, layers[1], stride=2)
-        self.layer3 = self._make_layer(block, 256, layers[2], stride=2)
-        self.layer4 = self._make_layer(block, 512, layers[3], stride=2)
-        self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
-        self.fc = nn.Linear(512*self.expansion, num_classes)
+        resnet_layers = ['self.conv1', 'self.bn1', 'self.relu', 'self.maxpool', 'self.layer1', 'self.layer2', 'self.layer3', 'self.layer4', 'self.avgpool', 'torch.flatten', 'self.fc']
+        forward1, forward2 = None, None
+
+        #need to sort the paged layers first
+        #if paged_layers empty - do regular setup
+        if not paged_layers:
+          self.conv1 = nn.Conv2d(
+                in_channels=img_channels,
+                out_channels=self.in_channels,
+                kernel_size=7, 
+                stride=2,
+                padding=3,
+                bias=False
+            )
+          self.bn1 = nn.BatchNorm2d(self.in_channels)
+          self.relu = nn.ReLU(inplace=True)
+          self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+          self.layer1 = self._make_layer(block, 64, layers[0], None, stride = 1)
+          self.layer2 = self._make_layer(block, 128, layers[1], None, stride = 2)
+          self.layer3 = self._make_layer(block, 256, layers[2], None, stride = 2)
+          self.layer4 = self._make_layer(block, 512, layers[3], None, stride = 2)
+          self.avgpool = nn.AvgPool2d(7, stride=1)
+          self.fc = nn.Linear(512, num_classes)   
+
+        else:
+          #initial layers empty but paged_layers exist 
+          initial_layers = [x for x in paged_layers if 'layer' not in x]
+          [paged_layers.remove(x) for x in paged_layers if x in initial_layers]
+          paged_layers.sort(key = lambda x: x.split('layer')[1] if 'layer' in x else x)
+
+        #do later - check how to do multiple forward passes setups to ensure the layers are different    
+          if initial_layers and not paged_layers:
+            #   for layer in paged_layers:
+            #       for i in range(len(resnet_layers[:4])):
+            #         if layer in resnet_layers[i]:
+            #           forward1 = resnet_layers[:i+1]
+            #           forward2 = resnet_layers[i+1:]
+          # elif initial_layers and paged_layers #both
+            print('extra')
+          elif not initial_layers and paged_layers:
+
+            #leave out the case for when they both exist for now 
+
+            #the idea here is to have all paged layers in layer 1 go in one go
+            #then layer 2, then layer3 etc 
+            #and make sure layer1 is created after this one go
+
+            #so make lists for each layer based on this 
+            layernum = 1
+            layernumlist, layerlist = [], []
+            for i in paged_layers:
+              if str(layernum) in i.split('.')[0]:
+                layerlist.append(i)
+              else:
+                layernumlist.append(layerlist)
+                layerlist = []
+                layerlist.append(i)
+                layernum += 1
+                continue
+            layernumlist.append(layerlist)
+            layernumlist = [layer for layer in layernumlist if layer]
+            layer1flag, layer2flag, layer3flag, layer4flag = False, False, False, False
+            for layer_num in layernumlist:
+              if layer_num[0].split('.')[0] == 'layer1':
+                self.layer1 = self._make_layer(block, 64, layers[0], layer_num, stride = 1)
+                layer1flag = True
+              if layer_num[0].split('.')[0] == 'layer2':
+                self.layer2 = self._make_layer(block, 64, layers[1], layer_num, stride = 1)
+                layer2flag = True
+              if layer_num[0].split('.')[0] == 'layer3':
+                self.layer3 = self._make_layer(block, 64, layers[2], layer_num, stride = 1)
+                layer3flag = True
+              if layer_num[0].split('.')[0] == 'layer4':
+                self.layer4 = self._make_layer(block, 64, layers[3], layer_num, stride = 1)
+                layer4flag = True
+            # All ResNets (18 to 152) contain a Conv2d => BN => ReLU for the first
+            # three layers. Here, kernel size is 7.
+            if not layer1flag:
+              self.layer1 = self._make_layer(block, 64, layers[0], None, stride = 1)
+            if not layer2flag:
+              self.layer2 = self._make_layer(block, 64, layers[1], None, stride = 1)
+            if not layer3flag:
+              self.layer3 = self._make_layer(block, 64, layers[2], None, stride = 1)
+            if not layer4flag:
+              self.layer4 = self._make_layer(block, 64, layers[3], None, stride = 1)
+            
+            self.conv1 = nn.Conv2d(
+                in_channels=img_channels,
+                out_channels=self.in_channels,
+                kernel_size=7, 
+                stride=2,
+                padding=3,
+                bias=False
+            )
+            self.bn1 = nn.BatchNorm2d(self.in_channels)
+            self.relu = nn.ReLU(inplace=True)
+            self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+            # self.layer1 = self._make_layer(block, 64, layers[0], None, None)
+            # self.layer2 = self._make_layer(block, 128, layers[1], None, None, stride=2)
+            # self.layer3 = self._make_layer(block, 256, layers[2], None, None, stride=2)
+            # self.layer4 = self._make_layer(block, 512, layers[3], None, None, stride=2)
+            self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
+            self.fc = nn.Linear(64*self.expansion, num_classes)
+            print('after layers made')
+
     def _make_layer(
-        self, 
+        self,  
         block: Type[BasicBlock],
         out_channels: int,
         blocks: int,
-        stride: int = 1
+        paging_layers = None,
+        stride: int = 1,
     ) -> nn.Sequential:
         downsample = None
+        self.in_channels = out_channels * self.expansion
         if stride != 1:
             """
             This should pass from `layer2` to `layer4` or 
@@ -121,19 +241,49 @@ class ResNet(nn.Module):
                 nn.BatchNorm2d(out_channels * self.expansion),
             )
         layers = []
-        layers.append(
-            block(
-                self.in_channels, out_channels, stride, self.expansion, downsample
+        if not paging_layers:
+          layers.append(block(self.in_channels, out_channels, stride, self.expansion, downsample))
+          self.in_channels = out_channels * self.expansion
+          for i in range(1, blocks):
+              layers.append(block(self.in_channels, out_channels, expansion=self.expansion))
+          return nn.Sequential(*layers)
+        else:
+          block0_layers, block1_layers = [], []
+          for layer in paging_layers:
+            if layer.split('.')[1] == str(0):
+              block0_layers.append(layer)
+            elif layer.split('.')[1] == str(1):
+              block1_layers.append(layer)
+          #check what was layer_name for the next part
+          if not block0_layers:
+            layers.append(
+                block(
+                    self.in_channels, out_channels, stride, self.expansion, downsample
+                )
             )
-        )
-        self.in_channels = out_channels * self.expansion
-        for i in range(1, blocks):
-            layers.append(block(
-                self.in_channels,
-                out_channels,
-                expansion=self.expansion
-            ))
-        return nn.Sequential(*layers)
+          else:
+            layers.append(
+                block(
+                    self.in_channels, out_channels, stride, self.expansion, downsample, page_layers = block0_layers
+                )
+            )
+          
+          for i in range(1, blocks):
+            if i == 1:  
+              layers.append(block(
+                  self.in_channels,
+                  out_channels,
+                  expansion=self.expansion,
+                  page_layers = block1_layers
+              ))
+            else: 
+              layers.append(block(
+                    self.in_channels,
+                    out_channels,
+                    expansion=self.expansion
+                ))
+          return nn.Sequential(*layers)
+
     def forward(self, x: Tensor) -> Tensor:
         x = self.conv1(x)
         x = self.bn1(x)
@@ -143,16 +293,16 @@ class ResNet(nn.Module):
         x = self.layer2(x)
         x = self.layer3(x)
         x = self.layer4(x)
-        # The spatial dimension of the final layer's feature 
-        # map should be (7, 7) for all ResNets.
+        # # The spatial dimension of the final layer's feature 
+        # # map should be (7, 7) for all ResNets.
         # print('Dimensions of the last convolutional feature map: ', x.shape)
         x = self.avgpool(x)
         x = torch.flatten(x, 1)
         x = self.fc(x)
         return x
 
-tensor = torch.rand([1, 3, 224, 224])
-model = ResNet(img_channels=3, num_layers=18, block=BasicBlock, num_classes=1000)
+# tensor = torch.rand([1, 3, 224, 224])
+model = ResNet(['layer1.0.bn2', 'layer2.1.conv1', 'layer3.1.conv2', 'layer4.0.relu'], img_channels=3, num_layers=18, block=BasicBlock, num_classes=1000)
 
 import torchvision.models as models
 import torch
@@ -160,6 +310,7 @@ from torch.fx import symbolic_trace
 import torch
 import torchvision
 
+import torch.nn as nn
 import copy
 
 import torch
@@ -212,6 +363,8 @@ optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 def update_lr(optimizer, lr):    
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
+# tensor = torch.rand([1, 3, 224, 224])
+model = ResNet(['layer1.0.bn2', 'layer2.1.conv1', 'layer3.1.conv2', 'layer4.0.relu'], img_channels=3, num_layers=18, block=BasicBlock, num_classes=1000)
 if torch.cuda.is_available():
     model.cuda()
 # Train the model
@@ -239,6 +392,4 @@ for epoch in range(num_epochs):
     if (epoch+1) % 20 == 0:
         curr_lr /= 3
         update_lr(optimizer, curr_lr)
-
-model
 
