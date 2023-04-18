@@ -100,6 +100,7 @@ class LinearLayer(DNNLayer):
         self.flop = 2 * self.param_count + self.out_features
 
     def find_outshape(self, in_features, out_features, input):
+        #come back to this assert statement
         # assert len(input.out_shape) == 2 and input.out_shape[1] == in_features, f"{input.out_shape}, {in_features}"
         return (input.out_shape[0], out_features)
 
