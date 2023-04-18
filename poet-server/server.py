@@ -29,6 +29,7 @@ def solve_handler(
         "resnet18_patch",
         "resnet18_fused",
         "resnet18_inplace",
+        "resnet18_pretrained",
         "resnet50",
         "resnet50_patch",
         "resnet50_fused",

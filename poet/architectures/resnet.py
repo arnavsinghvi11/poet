@@ -16,6 +16,10 @@ from poet.power_computation import (
     InPlaceConv2dLayer
 )
 
+from poet.power_computation import InputLayer
+import torchvision.models
+from poet.architectures.network_transform_pytorch import network_transform
+
 # Resnet implemented from the paper, not from PyTorch.
 
 
@@ -60,6 +64,19 @@ def resnet18(batch_size, num_classes=1000, input_shape=(3, 224, 224)):  # Imagen
         layers.append(GradientLayer(out_layer, [in_layer], layers[-1]))
 
     return layers
+
+def resnet18_pretrained(batch_size, num_classes=1000, input_shape=(3, 224, 224)):
+    layers = [InputLayer((batch_size, *input_shape))]
+
+    # Resnet18 model transformation - https://github.com/pytorch/vision/blob/main/torchvision/models/resnet.py, commit: 7dc5e5bd60b55eb4e6ea5c1265d6dc7b17d2e917
+    layers = network_transform(torchvision.models.resnet18(pretrained=True), layers, batch_size, num_classes, input_shape)
+    return layers
+    # layers.append(LinearLayer(512, num_classes, layers[-1]))
+    # # End of network. Find loss and reverse network.
+    # layers.append(CrossEntropyLoss(layers[-1], num_classes))
+    # bwd_layers = list(reversed(layers))
+    # for out_layer, in_layer in zip(bwd_layers[1:], bwd_layers[:-1]):
+    #     layers.append(GradientLayer(out_layer, [in_layer], layers[-1]))
 
 def resnet18_patch(batch_size, num_classes=1000, input_shape=(3, 224, 224)):  # Imagenet
     def make_basic_block(in_planes, planes, stride, padding, x):

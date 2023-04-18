@@ -120,6 +120,8 @@ class Conv2dLayer(DNNLayer):
         )
         self.extra_repr_params["in_features"] = in_features
         self.extra_repr_params["out_features"] = out_channels
+        print(kernel_size)
+        print(input.out_shape)
         self.flop = 2 * ((np.prod(kernel_size) * np.prod(input.out_shape) * out_channels)) + np.prod(self.out_shape)
 
     def find_outshape(self, in_features, out_channels, kernel_size, stride, padding, input):

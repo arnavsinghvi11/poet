@@ -25,6 +25,7 @@ from torchvision.models.resnet import BasicBlock, Bottleneck
 
 # transforms input model's network layers to output graph with POET layers for PyTorch models
 def network_transform(net, layers, batch_size, num_classes, input_shape):
+    print('here')
     if isinstance(net, torchvision.models.resnet.ResNet):
         modules = nn.Sequential(*list(net.children()))
     elif isinstance(net, torchvision.models.vgg.VGG):
@@ -47,6 +48,8 @@ def network_transform(net, layers, batch_size, num_classes, input_shape):
             relu_layer = ReLULayer(layers[-1])
             layers.append(relu_layer)
         if isinstance(module, nn.Conv2d):
+            print(module.kernel_size)
+            print(layers[-1].shape)
             conv_layer = Conv2dLayer(
                 module.in_channels, module.out_channels, module.kernel_size, module.stride[0], module.padding, layers[-1]
             )
