@@ -14,9 +14,18 @@ def solve(
     model: Literal[
         "linear",
         "vgg16",
+        "vgg16_patch",
+        "vgg16_fused",
+        "vgg16_inplace",
         "vgg16_cifar",
         "resnet18",
+        "resnet18_patch",
+        "resnet18_fused",
+        "resnet18_inplace",
         "resnet50",
+        "resnet50_patch",
+        "resnet50_fused",
+        "resnet50_inplace",
         "resnet18_cifar",
         "bert",
         "transformer",
@@ -142,7 +151,7 @@ if __name__ == "__main__":
         "--model",
         type=str,
         required=True,
-        choices=["vgg16", "vgg16_cifar", "resnet18", "resnet50", "resnet18_cifar", "bert", "transformer", "linear"],
+        choices=["vgg16", "vgg16_patch", "vgg16_fused", "vgg16_inplace", "vgg16_cifar", "resnet18", "resnet18_patch", "resnet18_fused", "resnet18_inplace", "resnet50", "resnet50_patch", "resnet50_fused", "resnet50_inplace", "resnet18_cifar", "bert", "transformer", "linear"],
     )
     parser.add_argument("--platform", type=str, required=True, choices=["m0", "a72", "a72nocache", "m4", "jetsontx2"])
     parser.add_argument("--ram-budget", type=int, required=True)

@@ -9,8 +9,8 @@ import pandas as pd
 
 from poet.architectures.bert import BERTBase
 from poet.architectures.linear import make_linear_network
-from poet.architectures.resnet import resnet18, resnet18_cifar, resnet50
-from poet.architectures.vgg import vgg16
+from poet.architectures.resnet import resnet18, resnet18_patch, resnet18_fused, resnet18_inplace, resnet18_cifar, resnet50, resnet50_patch, resnet50_fused, resnet50_inplace
+from poet.architectures.vgg import vgg16, vgg16_patch, vgg16_fused, vgg16_inplace
 from poet.chipsets import M4F, MKR1000, JetsonTX2, RPi, RPiNoCache
 from poet.poet_solver import POETSolution
 from poet.power_computation import DNNLayer, GradientLayer, get_net_costs
@@ -99,12 +99,30 @@ def get_chipset_and_net(platform: str, model: str, batch_size: int, mem_power_sc
         net = make_linear_network()
     elif model == "vgg16":
         net = vgg16(batch_size)
+    elif model == "vgg16_patch":
+        net = vgg16_patch(batch_size)
+    elif model == "vgg16_fused":
+        net = vgg16_fused(batch_size)
+    elif model == "vgg16_inplace":
+        net = vgg16_inplace(batch_size)
     elif model == "vgg16_cifar":
         net = vgg16(batch_size, 10, (3, 32, 32))
     elif model == "resnet18":
         net = resnet18(batch_size)
+    elif model == "resnet18_patch":
+        net = resnet18_patch(batch_size)
+    elif model == "resnet18_fused":
+        net = resnet18_fused(batch_size)
+    elif model == "resnet18_inplace":
+        net = resnet18_inplace(batch_size)
     elif model == "resnet50":
         net = resnet50(batch_size)
+    elif model == "resnet50_patch":
+        net = resnet50_patch(batch_size)
+    elif model == "resnet50_fused":
+        net = resnet50_fused(batch_size)
+    elif model == "resnet50_inplace":
+        net = resnet50_inplace(batch_size)
     elif model == "resnet18_cifar":
         net = resnet18_cifar(batch_size, 10, (3, 32, 32))
     elif model == "bert":

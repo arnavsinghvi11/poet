@@ -126,7 +126,100 @@ class Conv2dLayer(DNNLayer):
         height = ((input.out_shape[2] - kernel_size[0] + 2 * padding[0]) // stride) + 1
         weight = ((input.out_shape[3] - kernel_size[1] + 2 * padding[1]) // stride) + 1
         return (input.out_shape[0], out_channels, height, weight)
+    
+class InPlaceConv2dLayer(DNNLayer):
+    def __init__(self, in_features: int, out_channels: int, kernel_size, stride, padding, input: DNNLayer):
+        """
+        Differs from pytorch as pytorch param1 is in_channels, not in_features.
+        Here we assume that the in_features is  Channels_In
+        Kernel must always be [n X n]
+        We assume bias
+        """
+        super().__init__(
+            self.find_outshape(in_features, out_channels, kernel_size, stride, padding, input),
+            [input] if input is not None else [],
+            param_count=(out_channels * in_features * np.prod(kernel_size) + out_channels),
+        )
+        self.extra_repr_params["in_features"] = in_features
+        self.extra_repr_params["out_features"] = out_channels
+        self.stride = stride
+        self.padding = padding
+        self.kernel_size = kernel_size
+        self.flop = 2 * ((np.prod(kernel_size) * np.prod(input.out_shape) * out_channels)) + np.prod(self.out_shape)
 
+    def find_outshape(self, in_features, out_channels, kernel_size, stride, padding, input):
+        assert len(input.out_shape) == 4 and input.out_shape[1] == in_features, input.out_shape
+        height = ((input.out_shape[2] - kernel_size[0] + 2 * padding[0]) // stride) + 1
+        weight = ((input.out_shape[3] - kernel_size[1] + 2 * padding[1]) // stride) + 1
+        return (input.out_shape[0], out_channels, height, weight)
+
+    def forward(self, input: DNNLayer):
+        out_channels = self.extra_repr_params["out_features"]
+        padded_input = np.pad(input, ((0, 0), (0, 0), (self.padding[0], self.padding[0]), (self.padding[1], self.padding[1])))
+        batch_size, in_channels, height, width = input.shape
+        output_height = (height - self.kernel_size[0] + 2 * self.padding[0]) // self.stride + 1
+        output_width = (width - self.kernel_size[1] + 2 * self.padding[1]) // self.stride + 1
+        output = np.zeros((batch_size, out_channels, output_height, output_width))
+
+        for i in range(out_channels):
+            for j in range(self.kernel_size[0]):
+                for k in range(self.kernel_size[1]):
+                    output_channel = padded_input[:, :, j : j+output_height*self.stride : self.stride, k : k+output_width*self.stride : self.stride]
+                    output[:, i:i+1, :, :] += output_channel
+        return output
+
+class Conv2dPatchedLayer(DNNLayer):
+    def __init__(self, in_features: int, out_channels: int, kernel_size: tuple, stride: tuple, padding: tuple, patch_size: int, input_layer: DNNLayer):
+        """
+        Differs from pytorch as pytorch param1 is in_channels, not in_features.
+        Here we assume that the in_features is  Channels_In
+        Kernel must always be [n X n]
+        We assume bias
+        """
+        super().__init__(
+            self.find_outshape(in_features, out_channels, kernel_size, stride, padding, patch_size, input_layer),
+            [input_layer] if input_layer is not None else [],
+            param_count=(out_channels * in_features * np.prod(kernel_size) + out_channels),
+        )
+        self.extra_repr_params["in_features"] = in_features
+        self.extra_repr_params["out_features"] = out_channels
+        self.flop = 2 * ((np.prod(kernel_size) * np.prod(input_layer.out_shape) * out_channels)) + np.prod(self.out_shape)
+        self.patch_size = patch_size
+        self.stride = stride
+        self.padding = padding
+        self.kernel_size = kernel_size
+
+    def find_outshape(self, in_features, out_channels, kernel_size, stride, padding, patch_size, input_layer):
+        #come back to this # assert len(input_layer.out_shape) == 4 and input_layer.out_shape[1] == in_features, input_layer.out_shape
+        height = ((input_layer.out_shape[2] - kernel_size[0] + 2 * padding[0]) // stride) + 1
+        width = ((input_layer.out_shape[3] - kernel_size[1] + 2 * padding[1]) // stride) + 1
+        output_height = ((height - kernel_size[0] + 2 * padding[0]) // patch_size[0]) + 1
+        output_width = ((width - kernel_size[1] + 2 * padding[1]) // patch_size[1]) + 1
+        return (input_layer.out_shape[0], out_channels, output_height, output_width)
+    
+    def conv2d_patch(self, patch, kernel_size):
+        height = patch.shape[2] - kernel_size[0] + 1
+        width = patch.shape[3] - kernel_size[1] + 1
+        output = np.zeros((patch.shape[0], self.out_shape[2], self.out_shape[3]))
+        for k in range(patch.shape[0]):
+            for i in range(height):
+                for j in range(width):
+                    output[k, i, j] = np.sum(patch[k, :, i:i+kernel_size[0], j:j+kernel_size[1]])
+        return output
+
+    def forward(self, input: DNNLayer):
+        patch_height = self.patch_size
+        patch_width = self.patch_size
+        output = np.zeros((input.shape[0], self.out_shape[2], self.out_shape[3], self.out_shape[1]))
+
+        # Loop over patches and perform patch-wise convolution
+        for i in range(0, input.shape[2], patch_height):
+            for j in range(0, input.shape[3], patch_width):
+                patch = input[:, :, i:i+patch_height, j:j+patch_width]
+                patch_output = self.conv2d_patch(patch, self.kernel_size)
+                output[:, i:i+patch_output.shape[0], j:j+patch_output.shape[1], :] = patch_output
+
+        return output
 
 class BatchNorm2d(DNNLayer):
     """
@@ -240,7 +333,105 @@ class GradientLayer(DNNLayer):
             assert inputs[_index].out_shape == inputs[_index - 1].out_shape
         return inputs[0].out_shape
 
+#common operator fusions:
 
+class Conv2dBNLayer(DNNLayer):
+    def __init__(self, in_features: int, out_channels: int, kernel_size, stride, padding, input: DNNLayer):
+        """
+        Differs from pytorch as pytorch param1 is in_channels, not in_features.
+        Here we assume that the in_features is  Channels_In
+        Kernel must always be [n X n]
+        We assume bias
+        """
+        super().__init__(
+            self.find_outshape(in_features, out_channels, kernel_size, stride, padding, input),
+            [input] if input is not None else [],
+            param_count=(out_channels * in_features * np.prod(kernel_size) + out_channels),
+        )
+        self.extra_repr_params["in_features"] = in_features
+        self.extra_repr_params["out_features"] = out_channels
+        self.flop = 2 * ((np.prod(kernel_size) * np.prod(input.out_shape) * out_channels)) + np.prod(self.out_shape)
+        self.conv = Conv2dLayer(in_features, out_channels, kernel_size, stride, padding, input)
+        self.bn = BatchNorm2d(input)
+
+    def find_outshape(self, in_features, out_channels, kernel_size, stride, padding, input):
+        assert len(input.out_shape) == 4 and input.out_shape[1] == in_features, input.out_shape
+        height = ((input.out_shape[2] - kernel_size[0] + 2 * padding[0]) // stride) + 1
+        weight = ((input.out_shape[3] - kernel_size[1] + 2 * padding[1]) // stride) + 1
+        return (input.out_shape[0], out_channels, height, weight)
+    
+    def forward(self, x):
+        x = self.conv(x)
+        x = self.bn(x)
+        return x
+    
+class Conv2dReLULayer(DNNLayer):
+    def __init__(self, in_features: int, out_channels: int, kernel_size, stride, padding, input: DNNLayer):
+        """
+        Differs from pytorch as pytorch param1 is in_channels, not in_features.
+        Here we assume that the in_features is  Channels_In
+        Kernel must always be [n X n]
+        We assume bias
+        """
+        super().__init__(
+            self.find_outshape(in_features, out_channels, kernel_size, stride, padding, input),
+            [input] if input is not None else [],
+            param_count=(out_channels * in_features * np.prod(kernel_size) + out_channels),
+        )
+        self.extra_repr_params["in_features"] = in_features
+        self.extra_repr_params["out_features"] = out_channels
+        self.flop = 2 * ((np.prod(kernel_size) * np.prod(input.out_shape) * out_channels)) + np.prod(self.out_shape)
+        self.conv = Conv2dLayer(in_features, out_channels, kernel_size, stride, padding, input)
+        self.relu = ReLULayer(input)
+
+    def find_outshape(self, in_features, out_channels, kernel_size, stride, padding, input):
+        assert len(input.out_shape) == 4 and input.out_shape[1] == in_features, input.out_shape
+        height = ((input.out_shape[2] - kernel_size[0] + 2 * padding[0]) // stride) + 1
+        weight = ((input.out_shape[3] - kernel_size[1] + 2 * padding[1]) // stride) + 1
+        return (input.out_shape[0], out_channels, height, weight)
+    
+    def forward(self, x):
+        x = self.conv(x)
+        x = self.relu(x)
+        return x
+
+#detect the 2 layers being fused
+#Fused2Layers(Layer1(params*), Layer2(params*))
+
+class Fused2Layers(DNNLayer):
+    def __init__(self, layer1: DNNLayer, layer2: DNNLayer):
+        super().__init__(
+            self.find_outshape(layer1, layer2),
+            [layer1, layer2],
+            param_count=layer1.param_count + layer2.param_count,
+        )
+        self.flop = layer1.flop + layer2.flop
+        self.layer1 = layer1
+        self.layer2 = layer2
+    
+    def forward(self, x):
+        x = self.layer1(x)
+        x = self.layer2(x)
+        return x
+    
+class Fused3Layers(DNNLayer):
+    def __init__(self, layer1: DNNLayer, layer2: DNNLayer, layer3: DNNLayer):
+        super().__init__(
+            self.find_outshape(layer1, layer2, layer3),
+            [layer1, layer2, layer3],
+            param_count=layer1.param_count + layer2.param_count + layer3.param_count,
+        )
+        self.flop = layer1.flop + layer2.flop + layer3.flop
+        self.layer1 = layer1
+        self.layer2 = layer2
+        self.layer3 = layer3
+    
+    def forward(self, x):
+        x = self.layer1(x)
+        x = self.layer2(x)
+        x = self.layer3(x)
+        return x
+    
 def get_net_costs(net, device):
     compute_energy_list, compute_runtime_list, ram_list, param_ram_list, pagein_cost, pageout_cost = [[] for _ in range(6)]
     """ 
