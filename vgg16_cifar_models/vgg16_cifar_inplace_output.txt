@@ -1,0 +1,8 @@
+Total runtime of graph (forward + backward): 0.07924 milliseconds
+Total RAM consumption of forward pass: 182264 bytes
+Set parameter WLSAccessID
+Set parameter WLSSecret
+Set parameter LicenseID to value 925502
+Academic license - for non-commercial use only - registered to arnavs11@berkeley.edu
+Set parameter Threads to value 4
+POET successfully found an optimal solution with a memory budget of 30000000 bytes that consumes 3.95125 J of CPU power and 0.00084 J of memory paging power

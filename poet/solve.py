@@ -18,15 +18,13 @@ def solve(
         "vgg16_fused",
         "vgg16_inplace",
         "vgg16_cifar",
+        "vgg16_cifar_patch", 
+        "vgg16_cifar_fused", 
+        "vgg16_cifar_inplace", 
+        "vgg16_cifar_im2col", 
+        "vgg16_cifar_cache",
         "resnet18",
-        "resnet18_patch",
-        "resnet18_fused",
-        "resnet18_inplace",
-        "resnet18_pretrained",
         "resnet50",
-        "resnet50_patch",
-        "resnet50_fused",
-        "resnet50_inplace",
         "resnet18_cifar",
         "bert",
         "transformer",
@@ -152,7 +150,7 @@ if __name__ == "__main__":
         "--model",
         type=str,
         required=True,
-        choices=["vgg16", "vgg16_patch", "vgg16_fused", "vgg16_inplace", "vgg16_cifar", "resnet18", "resnet18_patch", "resnet18_fused", "resnet18_inplace", "resnet18_pretrained", "resnet50", "resnet50_patch", "resnet50_fused", "resnet50_inplace", "resnet18_cifar", "bert", "transformer", "linear"],
+        choices=["vgg16", "vgg16_cifar", "resnet18", "resnet18_pretrained", "resnet50", "resnet18_cifar", "bert", "transformer", "linear"],
     )
     parser.add_argument("--platform", type=str, required=True, choices=["m0", "a72", "a72nocache", "m4", "jetsontx2"])
     parser.add_argument("--ram-budget", type=int, required=True)
@@ -168,8 +166,18 @@ if __name__ == "__main__":
     parser.add_argument("--print-power-costs", action="store_true", default=False)
     parser.add_argument("--print-graph-info", action="store_true", default=True)
     parser.add_argument("--plot-directory", type=str, default=None)
+    parser.add_argument("--optimization", type=str, default="baseline", choices=["patch", "fused", "inplace", "im2col", "cache"])
     args = parser.parse_args()
-
+    if args.optimization == 'patch':
+        args.model += "_patch"
+    elif args.optimization == 'fused':
+        args.model += "_fused"
+    elif args.optimization == 'inplace':
+        args.model += "_inplace"
+    elif args.optimization == 'im2col':
+        args.model += "_im2col"
+    elif args.optimization == 'cache':
+        args.model += "_cache"
     result = solve(
         model=args.model,
         platform=args.platform,

@@ -129,7 +129,59 @@ class Conv2dLayer(DNNLayer):
         weight = ((input.out_shape[3] - kernel_size[1] + 2 * padding[1]) // stride) + 1
         return (input.out_shape[0], out_channels, height, weight)
     
-class InPlaceConv2dLayer(DNNLayer):
+class Im2ColConv2dLayer(DNNLayer):
+    def __init__(self, in_features: int, out_channels: int, kernel_size, stride, padding, input: DNNLayer):
+        """
+        Differs from pytorch as pytorch param1 is in_channels, not in_features.
+        Here we assume that the in_features is  Channels_In
+        Kernel must always be [n X n]
+        We assume bias
+        """
+        out_shape = self.find_outshape(in_features, out_channels, kernel_size, stride, padding, input)
+        super().__init__(
+            out_shape,
+            [input] if input is not None else [],
+            param_count=(out_channels * in_features * np.prod(kernel_size) + out_channels),
+        )
+        self.extra_repr_params["in_features"] = in_features
+        self.extra_repr_params["out_features"] = out_channels
+        self.stride = stride
+        self.padding = padding
+        self.kernel_size = kernel_size
+        self.flop = 2 * ((np.prod(kernel_size) * np.prod(input.out_shape) * out_channels)) + np.prod(out_shape)
+
+    def find_outshape(self, in_features, out_channels, kernel_size, stride, padding, input):
+        #come back to this assert statement later
+        #assert len(input.out_shape) == 4 and input.out_shape[1] == in_features, input.out_shape
+        height = ((input.out_shape[2] - kernel_size[0] + 2 * padding[0]) // stride) + 1
+        weight = ((input.out_shape[3] - kernel_size[1] + 2 * padding[1]) // stride) + 1
+        return (input.out_shape[0], out_channels, height, weight)
+    
+    def forward(self, input: DNNLayer):
+        batch_size, in_channels, height, width = input.shape
+        out_channels = self.extra_repr_params["out_features"]
+        padded_input = np.pad(input, [(0,0), (0,0), (self.padding[0], self.padding[0]), (self.padding[1], self.padding[1])], 'constant')
+        batch_size, in_channels, padded_height, padded_width = padded_input.shape
+        output_height = (padded_height - self.kernel_size[0]) // self.stride + 1
+        output_width = (padded_width - self.kernel_size[1]) // self.stride + 1
+        img = np.pad(padded_input, [(0,0), (0,0), (0,0), (0,0)], mode  ='constant')
+        col = np.zeros((batch_size, output_height, output_width, in_channels, self.kernel_size[0], self.kernel_size[1]))
+        
+        for i in range(output_height):
+            i_stride_start = i * self.stride
+            i_stride_end = i_stride_start + self.kernel_size[0]
+            for j in range(output_width):
+                j_stride_start = j * self.stride
+                j_stride_end = j_stride_start + self.kernel_size[1]
+                col[:, i, j, :, :, :] = img[:, :, i_stride_start:i_stride_end, j_stride_start:j_stride_end]
+
+        col = col.reshape(batch_size, output_height, output_width, in_channels*self.kernel_size[0]*self.kernel_size[1])
+        col_width = self.kernel_size[0].reshape(out_channels, -1)
+        out = np.einsum('ijkl,lm->ijkm', col, col_width)
+        out = out.reshape(batch_size, out_channels, output_height, output_width)
+        return out
+    
+class CacheConv2dLayer(DNNLayer):
     def __init__(self, in_features: int, out_channels: int, kernel_size, stride, padding, input: DNNLayer):
         """
         Differs from pytorch as pytorch param1 is in_channels, not in_features.
@@ -144,31 +196,74 @@ class InPlaceConv2dLayer(DNNLayer):
         )
         self.extra_repr_params["in_features"] = in_features
         self.extra_repr_params["out_features"] = out_channels
-        self.stride = stride
-        self.padding = padding
-        self.kernel_size = kernel_size
         self.flop = 2 * ((np.prod(kernel_size) * np.prod(input.out_shape) * out_channels)) + np.prod(self.out_shape)
 
     def find_outshape(self, in_features, out_channels, kernel_size, stride, padding, input):
-        assert len(input.out_shape) == 4 and input.out_shape[1] == in_features, input.out_shape
+        #come back to this assert statement later
+        #assert len(input.out_shape) == 4 and input.out_shape[1] == in_features, input.out_shap
         height = ((input.out_shape[2] - kernel_size[0] + 2 * padding[0]) // stride) + 1
         weight = ((input.out_shape[3] - kernel_size[1] + 2 * padding[1]) // stride) + 1
         return (input.out_shape[0], out_channels, height, weight)
 
     def forward(self, input: DNNLayer):
+        batch_size, in_channels, height, width = input.shape
         out_channels = self.extra_repr_params["out_features"]
-        padded_input = np.pad(input, ((0, 0), (0, 0), (self.padding[0], self.padding[0]), (self.padding[1], self.padding[1])))
+        padded_input = np.pad(input, [(0,0), (0,0), (self.padding[0], self.padding[0]), (self.padding[1], self.padding[1])], 'constant')
+        batch_size, in_channels, padded_height, padded_width = padded_input.shape
+        output_height = (padded_height - self.kernel_size[0]) // self.stride + 1
+        output_width = (padded_width - self.kernel_size[1]) // self.stride + 1
+
+        # HWC to CHW transformation
+        img = np.zeros((batch_size, in_channels, padded_height, padded_width))
+        for b in range(batch_size):
+            for c in range(in_channels):
+                img[b,c,:,:] = padded_input[b,:,:,c]
+        img = img.transpose(0, 1, 3, 2)
+
+        col = np.zeros((batch_size, in_channels, self.kernel_size[0], self.kernel_size[1], output_height, output_width))
+
+        for i in range(self.kernel_size[0]):
+            i_stride_start = i * self.stride
+            i_stride_end = i_stride_start + output_height*self.stride
+            for j in range(self.kernel_size[1]):
+                j_stride_start = j * self.stride
+                j_stride_end = j_stride_start + output_width*self.stride
+                col[:, :, i, j, :, :] = img[:, :, i_stride_start:i_stride_end:self.stride, j_stride_start:j_stride_end:self.stride]
+
+        col = col.transpose(0, 4, 5, 1, 2, 3).reshape(batch_size, output_height*output_width, in_channels*self.kernel_size[0]*self.kernel_size[1])
+        col_width = self.kernel_size.reshape(out_channels, -1)
+        out = np.einsum('ijk,lm->ijm', col, col_width)
+        out = out.reshape(batch_size, out_channels, output_height, output_width)
+        return out
+
+   
+class InPlaceConv2dLayer(DNNLayer):
+    def __init__(self, in_features: int, out_channels: int, kernel_size, stride, padding, input: DNNLayer):
+        super().__init__(
+            input.out_shape,
+            [input] if input is not None else [],
+            param_count=(out_channels * in_features * np.prod(kernel_size) + out_channels),
+        )
+        self.extra_repr_params["in_features"] = in_features
+        self.extra_repr_params["out_features"] = out_channels
+        self.stride = stride
+        self.padding = padding
+        self.kernel_size = kernel_size
+        self.flop = 2 * ((np.prod(kernel_size) * np.prod(input.out_shape) * out_channels)) + np.prod(input.out_shape)
+
+    def find_outshape(self, in_features, out_channels, kernel_size, stride, padding, input):
+        return input.out_shape
+
+    def forward(self, input: DNNLayer):
+        out_channels = self.extra_repr_params["out_features"]
         batch_size, in_channels, height, width = input.shape
         output_height = (height - self.kernel_size[0] + 2 * self.padding[0]) // self.stride + 1
         output_width = (width - self.kernel_size[1] + 2 * self.padding[1]) // self.stride + 1
-        output = np.zeros((batch_size, out_channels, output_height, output_width))
-
         for i in range(out_channels):
             for j in range(self.kernel_size[0]):
                 for k in range(self.kernel_size[1]):
-                    output_channel = padded_input[:, :, j : j+output_height*self.stride : self.stride, k : k+output_width*self.stride : self.stride]
-                    output[:, i:i+1, :, :] += output_channel
-        return output
+                    input[:, i:i+1, :, :] += input[:, :, j : j+output_height*self.stride : self.stride, k : k+output_width*self.stride : self.stride]
+        return input[:, :out_channels, :output_height, :output_width]
 
 class Conv2dPatchedLayer(DNNLayer):
     def __init__(self, in_features: int, out_channels: int, kernel_size: tuple, stride: tuple, padding: tuple, patch_size: int, input_layer: DNNLayer):
@@ -213,14 +308,11 @@ class Conv2dPatchedLayer(DNNLayer):
         patch_height = self.patch_size
         patch_width = self.patch_size
         output = np.zeros((input.shape[0], self.out_shape[2], self.out_shape[3], self.out_shape[1]))
-
-        # Loop over patches and perform patch-wise convolution
         for i in range(0, input.shape[2], patch_height):
             for j in range(0, input.shape[3], patch_width):
                 patch = input[:, :, i:i+patch_height, j:j+patch_width]
                 patch_output = self.conv2d_patch(patch, self.kernel_size)
                 output[:, i:i+patch_output.shape[0], j:j+patch_output.shape[1], :] = patch_output
-
         return output
 
 class BatchNorm2d(DNNLayer):
@@ -357,7 +449,7 @@ class Conv2dBNLayer(DNNLayer):
         self.bn = BatchNorm2d(input)
 
     def find_outshape(self, in_features, out_channels, kernel_size, stride, padding, input):
-        assert len(input.out_shape) == 4 and input.out_shape[1] == in_features, input.out_shape
+        # assert len(input.out_shape) == 4 and input.out_shape[1] == in_features, input.out_shape
         height = ((input.out_shape[2] - kernel_size[0] + 2 * padding[0]) // stride) + 1
         weight = ((input.out_shape[3] - kernel_size[1] + 2 * padding[1]) // stride) + 1
         return (input.out_shape[0], out_channels, height, weight)

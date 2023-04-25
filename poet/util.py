@@ -9,8 +9,8 @@ import pandas as pd
 
 from poet.architectures.bert import BERTBase
 from poet.architectures.linear import make_linear_network
-from poet.architectures.resnet import resnet18, resnet18_patch, resnet18_fused, resnet18_inplace, resnet18_cifar, resnet18_pretrained, resnet50, resnet50_patch, resnet50_fused, resnet50_inplace
-from poet.architectures.vgg import vgg16, vgg16_patch, vgg16_fused, vgg16_inplace
+from poet.architectures.resnet import resnet18, resnet18_cifar, resnet18_cifar_cache, resnet18_pretrained, resnet50
+from poet.architectures.vgg import vgg16, vgg16_patch, vgg16_fused, vgg16_inplace, vgg16_im2col, vgg16_cache
 from poet.chipsets import M4F, MKR1000, JetsonTX2, RPi, RPiNoCache
 from poet.poet_solver import POETSolution
 from poet.power_computation import DNNLayer, GradientLayer, get_net_costs
@@ -107,26 +107,64 @@ def get_chipset_and_net(platform: str, model: str, batch_size: int, mem_power_sc
         net = vgg16_inplace(batch_size)
     elif model == "vgg16_cifar":
         net = vgg16(batch_size, 10, (3, 32, 32))
+    elif model == "vgg16_cifar_patch":
+        net = vgg16_patch(batch_size, 10, (3, 32, 32))
+    elif model == "vgg16_cifar_fused":
+        net = vgg16_fused(batch_size, 10, (3, 32, 32))
+    elif model == "vgg16_cifar_inplace":
+        net = vgg16_inplace(batch_size, 10, (3, 32, 32))
+    elif model == "vgg16_cifar_im2col":
+        net = vgg16_im2col(batch_size, 10, (3, 32, 32))
+    elif model == "vgg16_cifar_cache":
+        net = vgg16_cache(batch_size, 10, (3, 32, 32))
     elif model == "resnet18":
         net = resnet18(batch_size)
     elif model == "resnet18_patch":
-        net = resnet18_patch(batch_size)
+        net = resnet18(batch_size, "patch")
     elif model == "resnet18_fused":
-        net = resnet18_fused(batch_size)
+        net = resnet18(batch_size, "fused")
     elif model == "resnet18_inplace":
-        net = resnet18_inplace(batch_size)
-    elif model == "resnet18_pretrained":
-        net = resnet18_pretrained(batch_size)
+        net = resnet18(batch_size, "inplace")
+    elif model == "resnet18_im2col":
+        net = resnet18(batch_size, "im2col")
+    elif model == "resnet18_cache":
+        net = resnet18(batch_size, "cache")
     elif model == "resnet50":
         net = resnet50(batch_size)
     elif model == "resnet50_patch":
-        net = resnet50_patch(batch_size)
+        net = resnet50(batch_size, "patch")
     elif model == "resnet50_fused":
-        net = resnet50_fused(batch_size)
+        net = resnet50(batch_size, "fused")
     elif model == "resnet50_inplace":
-        net = resnet50_inplace(batch_size)
+        net = resnet50(batch_size, "inplace")
+    elif model == "resnet50_im2col":
+        net = resnet50(batch_size, "im2col")
+    elif model == "resnet50_cache":
+        net = resnet50(batch_size, "cache")
     elif model == "resnet18_cifar":
         net = resnet18_cifar(batch_size, 10, (3, 32, 32))
+    elif model == "resnet18_cifar_patch":
+        net = resnet18_cifar(batch_size, "patch", 10, (3, 32, 32))
+    elif model == "resnet18_cifar_fused":
+        net = resnet18_cifar(batch_size, "fused", 10, (3, 32, 32))
+    elif model == "resnet18_cifar_inplace":
+        net = resnet18_cifar(batch_size, "inplace", 10, (3, 32, 32))
+    elif model == "resnet18_cifar_im2col":
+        net = resnet18_cifar(batch_size, "im2col", 10, (3, 32, 32))
+    elif model == "resnet18_cifar_cache":
+        net = resnet18_cifar_cache(batch_size, "cache", 10, (3, 32, 32))
+    elif model == "resnet18_pretrained":
+        net = resnet18_pretrained(batch_size)
+    elif model == "resnet18_pretrained_patch":
+        net = resnet18_pretrained(batch_size, "patch")
+    elif model == "resnet18_pretrained_fused":
+        net = resnet18_pretrained(batch_size, "fused")
+    elif model == "resnet18_pretrained_inplace":
+        net = resnet18_pretrained(batch_size, "inplace")
+    elif model == "resnet18_pretrained_im2col":
+        net = resnet18_pretrained(batch_size, "im2col")
+    elif model == "resnet18_pretrained_cache":
+        net = resnet18_pretrained(batch_size, "cache")
     elif model == "bert":
         net = BERTBase(SEQ_LEN=512, HIDDEN_DIM=768, I=64, HEADS=12, NUM_TRANSFORMER_BLOCKS=12)
     elif model == "transformer":

@@ -232,6 +232,7 @@ class POETSolverGurobi:
                 with redirect_stdout(open(os.devnull, "w")):
                     self.m.optimize()
         solve_time = t.elapsed
+        print('Solve time is: ' + str(solve_time))
 
         is_feasible = self.m.status != GRB.INFEASIBLE and self.m.solCount >= 1
         return POETSolution(
